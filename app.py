@@ -1,10 +1,15 @@
 import os
-from flask import Flask, render_template, request, send_file, after_this_request
-from pdf2docx import Converter
+import time
+from flask import Flask, render_template, request, send_from_directory
 
 app = Flask(__name__)
-UPLOAD_FOLDER = 'conversions'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Absolute paths to avoid "File Not Found" errors
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'conversions')
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 @app.route('/')
 def index():
@@ -13,48 +18,41 @@ def index():
 @app.route('/convert', methods=['POST'])
 def convert():
     if 'pdf_file' not in request.files:
-        return "No file uploaded", 400
+        return "No file part", 400
     
     file = request.files['pdf_file']
     if file.filename == '':
-        return "No file selected", 400
+        return "No selected file", 400
 
-    # Define paths
-    pdf_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    docx_name = os.path.splitext(file.filename)[0] + ".docx"
+    # Create unique filename using timestamp to avoid "File in use" errors
+    timestamp = int(time.time())
+    pdf_path = os.path.join(UPLOAD_FOLDER, f"input_{timestamp}.pdf")
+    docx_name = f"Converted_{timestamp}.docx"
     docx_path = os.path.join(UPLOAD_FOLDER, docx_name)
     
     file.save(pdf_path)
 
     try:
-        # High-accuracy conversion settings
-        # Replace your current cv.convert line with this improved version:
-try:
-    cv = Converter(pdf_path)
-    
-    # These settings force the engine to 'guess' spaces more aggressively
-    cv.convert(docx_path, 
-               start=0, 
-               end=None, 
-               ocr=1,             # Use OCR if text is missing
-               force_ocr=True,    # Force OCR to re-examine word spacing
-               connected_components=True) # Helps separate merged letters
-    cv.close()
+        from pdf2docx import Converter
+        cv = Converter(pdf_path)
+        # Advanced spacing and OCR settings for your resume
+        cv.convert(docx_path, start=0, end=None, ocr=1, multi_processing=True)
+        cv.close()
 
-        @after_this_request
-        def cleanup(response):
-            try:
-                os.remove(pdf_path)
-            except Exception as e:
-                print(f"Cleanup error: {e}")
-            return response
+        # Clean up the input PDF immediately
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
-        return send_file(docx_path, as_attachment=True)
+        # Force the browser to treat this as a download
+        return send_from_directory(
+            UPLOAD_FOLDER, 
+            docx_name, 
+            as_attachment=True,
+            download_name="Your_Converted_Resume.docx"
+        )
 
     except Exception as e:
-        return f"Conversion failed: {str(e)}", 500
+        return f"Error: {str(e)}", 500
 
 if __name__ == '__main__':
-
-    app.run(debug=True)
-
+    app.run(debug=True, port=5000)
